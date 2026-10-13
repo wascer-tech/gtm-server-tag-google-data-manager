@@ -10,13 +10,20 @@ for anyone to use.
 
 ## What the template does
 
-1. Sends offline conversions to the Google Data Manager API.
-2. Runs through the Wascer proxy, or through your own credentials.
-3. Hashes email, phone and address fields before sending them.
-4. Carries GCLID, GBRAID and WBRAID so Google can attribute the conversion.
-5. Passes ad storage, ad user data and ad personalization consent through.
-6. Can validate only, so you can dry run an event before spending a real one.
-7. Optionally logs every call into a BigQuery table.
+1. Sends conversion events to the Google Data Manager API, one event or many
+   per request.
+2. Runs through the Wascer proxy, or through your own Google credentials.
+3. Sends one event to several destinations at once. Each destination can name a
+   manager account (MCC) as the login account, for accounts you reach through
+   one.
+4. Hashes email, phone and address fields before sending them, with optional
+   encryption on top.
+5. Carries GCLID, GBRAID and WBRAID so Google can attribute the conversion,
+   reading them from the URL or the session cookies when the event lacks them.
+6. Sends ad user data and ad personalization consent in the format the API
+   expects.
+7. Can validate only, so you can dry run an event before spending a real one.
+8. Logs to the console and, optionally, to a BigQuery table.
 
 ## Installation
 
@@ -30,15 +37,15 @@ for anyone to use.
 
 | Field | Type | What it does |
 |---|---|---|
-| Authentication Flow | Select | Wascer proxy, or your own Google credentials. |
-| Google Ads Account ID | Text | Destination account the conversion belongs to. |
-| Conversion Action ID | Text | Conversion action being reported. |
-| Event Settings | Group | Source, value, currency, transaction id, timestamp and validate only. |
-| Click Attribution | Group | GCLID, GBRAID and WBRAID. |
-| User Data | Group | Email, phone, name, address, city, region, postal and country. Hashed before sending. |
-| Consent Settings | Group | Ad storage, ad user data and ad personalization. |
-| Extra Fields | Group | User agent and IP address. |
-| Logging | Group | Console logging plus optional BigQuery project, dataset and table. |
+| Event Type | Radio | Conversion, or a page view that saves the session attributes (gclid, gbraid, `gad_` parameters) in a cookie for later conversions. |
+| Authentication Type | Radio | Wascer proxy, or your own Google credentials. |
+| Destination Accounts and Conversion Events | Table | One row per destination: product, operating account, optional login account (MCC) and the conversion action. |
+| Validate Only | Select | Validates the request without recording the conversion. |
+| Request-level Consent | Group | Ad user data and ad personalization consent for the whole request. |
+| Conversion Events | Group | Encoding, encryption, single or multiple events, and the conversion, user, ad identifier, device, cart and custom variable data. |
+| Session Attributes Cookie Settings | Group | Expiration, domain, SameSite and HttpOnly of the cookies the page view event writes. |
+| Tag Execution Consent Settings | Radio | Whether the tag requires ad storage consent to fire. |
+| Logs Settings | Group | Console logging plus optional BigQuery project, dataset and table. |
 
 ## Requirements
 
