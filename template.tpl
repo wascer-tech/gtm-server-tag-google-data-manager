@@ -401,6 +401,13 @@ ___TEMPLATE_PARAMETERS___
             "type": "EQUALS"
           }
         ]
+      },
+      {
+        "type": "TEXT",
+        "name": "systemLogEventType",
+        "displayName": "Event type (System Log)",
+        "simpleValueType": true,
+        "help": "Custom System Log event type. Empty uses event_name. Collection is controlled by the container toggle."
       }
     ]
   }
@@ -463,6 +470,8 @@ function sendViaWasterProxy() {
     RequestBody: postBody
   });
 
+  var serialized = JSON.stringify(postBody);
+  var started = getTimestampMillis();
   sendHttpRequest(
     postUrl,
     (statusCode, headers, body) => {
@@ -475,6 +484,8 @@ function sendViaWasterProxy() {
         ResponseHeaders: headers,
         ResponseBody: body
       });
+
+      copySystemLog('google_data_manager', 'Google Data Manager', postUrl, 'POST', serialized, statusCode, body, started);
 
       if (statusCode >= 200 && statusCode < 400) {
         data.gtmOnSuccess();
@@ -490,7 +501,7 @@ function sendViaWasterProxy() {
       },
       method: 'POST'
     },
-    JSON.stringify(postBody)
+    serialized
   );
 }
 
@@ -511,7 +522,9 @@ function sendViaOwnCredentials() {
     RequestBody: googlePayload
   });
 
-  sendHttpRequest(
+  var serialized = JSON.stringify(googlePayload);
+  var started = getTimestampMillis();
+  var request = sendHttpRequest(
     postUrl,
     {
       headers: {
@@ -520,8 +533,15 @@ function sendViaOwnCredentials() {
       method: 'POST',
       authorization: auth
     },
-    JSON.stringify(googlePayload)
-  ).then((result) => {
+    serialized
+  );
+
+  // Side branch: copies a network failure without changing how the chain below settles.
+  request.then(() => {}, (error) => {
+    copySystemLog('google_data_manager', 'Google Data Manager', postUrl, 'POST', serialized, 0, error && (error.body || error.reason), started);
+  });
+
+  request.then((result) => {
     log({
       Name: 'GDataManager',
       Type: 'Response',
@@ -531,6 +551,8 @@ function sendViaOwnCredentials() {
       ResponseHeaders: result.headers,
       ResponseBody: result.body
     });
+
+    copySystemLog('google_data_manager', 'Google Data Manager', postUrl, 'POST', serialized, result.statusCode, result.body, started);
 
     if (result.statusCode >= 200 && result.statusCode < 400) {
       data.gtmOnSuccess();
@@ -1007,6 +1029,37 @@ function determinateIsLoggingEnabledForBigQuery() {
   return data.bigQueryLogType === 'always';
 }
 
+// System Log is controlled by the proxy header, never by tag configuration.
+// Deliberately detached: neither delivery nor collector failure gates tag completion.
+function copySystemLog(platform, tagName, requestUrl, requestMethod, requestBody, responseStatus, responseBody, started) {
+  if (getRequestHeader('x-wascer-log') !== '1') return;
+  const Promise = require('Promise');
+  const elapsed = getTimestampMillis() - started;
+  const duration = elapsed < 0 ? 0 : elapsed > 4294967295 ? 4294967295 : elapsed;
+  Promise.create((resolve) => resolve()).then(() => {
+    const getEventData = require('getEventData');
+    const eventName = getEventData('event_name');
+    const envelope = {
+      trace_id: getRequestHeader('x-wascer-trace-id') || '',
+      platform: platform,
+      tag_name: tagName,
+      event_name: getType(eventName) === 'string' ? eventName : '',
+      event_type: data.systemLogEventType || (getType(eventName) === 'string' ? eventName : ''),
+      request_method: requestMethod,
+      request_url: requestUrl,
+      request_body: requestBody,
+      response_status: responseStatus || 0,
+      response_body: getType(responseBody) === 'string' ? responseBody : '',
+      duration_ms: duration
+    };
+    return sendHttpRequest('https://system-log.wascer.internal/log', {
+      method: 'POST',
+      timeout: 500,
+      headers: {'Content-Type': 'application/json'}
+    }, JSON.stringify(envelope));
+  }).then(() => {}, () => {});
+}
+
 
 ___SERVER_PERMISSIONS___
 
@@ -1143,6 +1196,36 @@ ___SERVER_PERMISSIONS___
                   {
                     "type": 1,
                     "string": "user-agent"
+                  }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "headerName"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "x-wascer-log"
+                  }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "headerName"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "x-wascer-trace-id"
                   }
                 ]
               }
@@ -1299,3 +1382,21 @@ Google Data Manager offline conversion template for Waster platform.
 Sends conversion events to POST /google-conversions/events via Waster proxy (x-user-id header)
 or directly to Google Data Manager API using own credentials.
 Based on the Google Ads Offline Conversion Waster template pattern.
+
+System Log (manual template import; no remote publication):
+Only x-wascer-log: 1 enables a best-effort output copy after the delivery request
+finishes. The copy goes only to https://system-log.wascer.internal/log
+(pod loopback, trusted TLS on 443) and carries x-wascer-trace-id as trace_id.
+Event type (System Log) is free text; empty uses event_name.
+Both delivery paths are copied: the Waster proxy
+(https://waster.sourei.com.br/google-conversions/events) and own credentials
+(https://datamanager.googleapis.com/v1/events:ingest). The request URL, the request
+body and the response body are the strings the tag actually used, without masking,
+projection or truncation. Through the proxy the body carries the raw user data
+(email, phone, name, address); with own credentials it carries the hashed identifiers.
+Network failures use status 0 and the available error body/reason. No headers,
+credentials (x-user-id, Google authorization), modes, queue or retry are added.
+BigQuery and console logging are untouched and are not copied.
+The logger is detached from tag completion; late delivery remains best-effort.
+Existing send_http permission remains any; the logging destination is fixed in
+code to the exact loopback URL and never derives from a tag field.
