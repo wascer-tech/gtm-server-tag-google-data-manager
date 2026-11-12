@@ -39,6 +39,41 @@ for anyone to use.
 | Consent Settings | Group | Ad storage, ad user data and ad personalization. |
 | Extra Fields | Group | User agent and IP address. |
 | Logging | Group | Console logging plus optional BigQuery project, dataset and table. |
+| Event type (System Log) | Text (optional) | Last field of the Logging group. Label for the System Log copy. Empty uses the event name. See below. |
+
+## System Log
+
+When the server container has logging turned on, the tag also sends a copy of
+what it sent, and of the answer it got back, to the Wascer System Log. The copy
+holds the request URL, method and body, the response status and body, how long
+the request took, the event name and your **Event type (System Log)** label (the
+event name when the label is empty).
+
+The copy describes the request the tag really made: the Wascer proxy URL and its
+answer when the tag runs through the proxy, or the Google Data Manager API URL
+and its answer when it runs with your own credentials.
+
+This only happens when logging is turned on for the container: the hosting proxy
+sets the `x-wascer-log: 1` request header (and `x-wascer-trace-id` to correlate
+the copy). Without that header the tag does nothing extra. Nothing is masked: the
+request and response bodies are copied exactly as they were sent and received.
+Through the Wascer proxy that body carries the user data as filled in (the proxy
+hashes it afterwards); with your own credentials it carries the hashed values.
+Request headers and credentials are not copied. The copy is best effort and never
+changes the result of the tag. Console and BigQuery logging work as before.
+
+## Updating the template
+
+To bring a workspace that already has an older version of this template up to date:
+
+1. In your **server** container, open **Templates**, then **Tag Templates**,
+   and open the Google Data Manager template.
+2. Open the three dot menu and choose **Import**.
+3. Pick the new `template.tpl` from this repository and save the template.
+4. **Publish** the workspace (Submit, then Publish) so the live container picks
+   up the new version.
+
+Tags already created from the template keep the values you filled in.
 
 ## Requirements
 
